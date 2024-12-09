@@ -1,13 +1,17 @@
 use std::collections::{VecDeque, HashMap};
-use std::thread;
-use std::sync::{Arc, Mutex, mpsc};
+use std::env;
 //file IO
 use std::path::Path;
 use std::fs::File;
 use std::io::BufRead;
 use std::io;
+//mult threading
+use std::thread;
+use std::sync::{Arc, Mutex, mpsc};
+//timeing
+use std::time::Instant;
 
-//takes from the line read rust by example
+//takes from the line read. from rust by example
 fn read_lines<P>(filename: P) -> io::Result<io::Lines<io::BufReader<File>>> where P: AsRef<Path>, {
     let file = File::open(filename)?;
     Ok(io::BufReader::new(file).lines())
@@ -22,10 +26,10 @@ impl Graph {
             edge: HashMap::with_capacity(size),
         }
     }
-    fn add_edge(&mut self, mut i:&i32, mut j:&i32) {
+    fn add_edge(&mut self, i:&i32, j:&i32) {
         //needs to be in two differnt blocks because borrowing
         {
-            let mut iedges = self.edge.get_mut(i);
+            let iedges = self.edge.get_mut(i);
             if let Some(vec) = iedges {
                 vec.push(*j);
             } else {
@@ -34,7 +38,7 @@ impl Graph {
 
         }
         {
-            let mut jedges = self.edge.get_mut(j);
+            let jedges = self.edge.get_mut(j);
             if let Some(vec) = jedges {
                 vec.push(*i);
             } else {
@@ -44,7 +48,7 @@ impl Graph {
         }
 
     }
-    fn read_from(filename:&str, size:usize) -> Self {
+    fn read_from(filename:&str, size:usize, delim:String) -> Self {
         let mut g = Graph::new(size);
         //open file
         if let Ok(lines) = read_lines(filename) {
@@ -59,7 +63,9 @@ impl Graph {
                     }
                 }
             }
-        }            
+        } if let Err(lines) = read_lines(filename) {
+            eprintln!("file couldn't open: {}", lines);
+        }
         g 
     }
     fn bfs(&self, r:i32) {
@@ -68,34 +74,38 @@ impl Graph {
         //boolean array to check if node has been visted before
         let mut visted = vec!(false; self.edge.capacity());
         verts.push_back(r);
+        let mut count = 1;
         while verts.len() != 0 {
             //if the que not empty
             if let Some(n) = verts.pop_front() {
-                println!("{}", n);
                 if let Some(edges) = self.edge.get(&n) {
+                    count += 1;
                     for v in edges {
                         let vsize = (*v) as usize; //panic if too big
                         if !visted[vsize] {
+                            //println!("{}", *v);
                             visted[vsize] = true;
                             verts.push_back(*v);
                         }
                     }
                 }
             }
-            //println!("{:?}", verts)
+           
         }
+        println!("count {}", count);
     }
-    /*fn parra_bfs(&self, r:usize) {
-        let edges = Arc::new(self.edge.mat); //is now immutable
+    fn parra_bfs(&self, r:i32) {
+        let edges = Arc::new(self.edge.clone()); //is now immutable
         //boolean array to check if node has been visted before
-        let visted = Arc::new(Mutex::new([false; SIZE]));
+        let visted = Arc::new(Mutex::new(vec!(false; self.edge.capacity())));
         //println!("{:?}", edges);
         //que of all nodes that need to be vististed. 
-        let mut verts: VecDeque<usize> = VecDeque::new();
+        let mut verts: VecDeque<i32> = VecDeque::new();
         verts.push_back(r);
         let mut vist = visted.lock().unwrap();
-        vist[r] = true;//mark root as found
+        vist[r as usize] = true;//mark root as found
         drop(vist);
+        let mut count = 1;
         loop {
             //if there is no nodes left
             if verts.is_empty() {
@@ -112,13 +122,14 @@ impl Graph {
                 //allows mult tranmistions
                 let tx = tx.clone();
                 let handle = thread::spawn(move || {      
-                    for i in 0..SIZE {
+                    if let Some(edges) = edges.get(&v) {
                         //println!("{}", edges[*v][i]);
-                        if edges[*v][i] == 1 { 
+                        for e in edges {
                             let mut vist = visted.lock().unwrap();
-                            if !vist[i] {
-                                vist[i] = true;
-                                let _= tx.send(i.clone()); 
+                            let es = (*e) as usize; //panic if too big
+                            if !vist[es] {
+                                vist[es] = true;
+                                let _= tx.send(e.clone()); 
                             }
                         }
                     }
@@ -127,22 +138,25 @@ impl Graph {
             }
              
             for handle in handles {
+                count += 1;
                 handle.join().unwrap();
             }
            //println!("{}", rec);
             verts = VecDeque::new(); //allows to be borrowed again
             drop(tx); //closing the channel
             for rec in rx {
-                println!("{}", rec);
+                //println!("{}", rec);
                 if !verts.contains(&rec) {
                     verts.push_back(rec);
                 }
             }
-        
         }
-    }*/
+        println!("count {}", count);
+
+    }
 }
 fn main() {
+    let args: Vec<String> =  env::args().collect();
     let mut g = Graph::new(0);
     g.add_edge(&1,&0);
     g.add_edge(&2,&0);
@@ -151,7 +165,18 @@ fn main() {
     g.add_edge(&3,&5);
     //g.bfs(0);
 
-    let big_g = Graph::read_from("CA-GrQc.txt", 6000);
+    println!("{:?}", args);
+    let big_g = Graph::read_from(&args[1], args[2].parse::<usize>().unwrap(), args[3].clone());
     //println!("{:?}", big_g.edge);   
-    big_g.bfs(2710);
+    let now = Instant::now();
+    big_g.parra_bfs(254913);
+    let end = now.elapsed();
+    println!("parrallel {:.2?}", end);
+
+    let now = Instant::now();
+    big_g.bfs(254913);
+    let end = now.elapsed();
+    println!("sequential {:.2?}", end);
+
+
 }
